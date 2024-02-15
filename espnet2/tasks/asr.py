@@ -26,6 +26,7 @@ from espnet2.asr.decoder.whisper_decoder import OpenAIWhisperDecoder
 from espnet2.asr.encoder.abs_encoder import AbsEncoder
 from espnet2.asr.encoder.avhubert_encoder import FairseqAVHubertEncoder
 from espnet2.asr.encoder.branchformer_encoder import BranchformerEncoder
+from espnet2.asr.encoder.mobile_branchformer_encoder import MobileBranchformerEncoder
 from espnet2.asr.encoder.conformer_encoder import ConformerEncoder
 from espnet2.asr.encoder.contextual_block_conformer_encoder import (
     ContextualBlockConformerEncoder,
@@ -34,6 +35,8 @@ from espnet2.asr.encoder.contextual_block_transformer_encoder import (
     ContextualBlockTransformerEncoder,
 )
 from espnet2.asr.encoder.e_branchformer_encoder import EBranchformerEncoder
+from espnet2.asr.encoder.e_branchformer_encoder_sm import EBranchformerEncoder_SM
+from espnet2.asr.encoder.e_branchformer_encoder_sm_lite import EBranchformerEncoder_SM_Lite
 from espnet2.asr.encoder.hubert_encoder import (
     FairseqHubertEncoder,
     FairseqHubertPretrainEncoder,
@@ -156,7 +159,10 @@ encoder_choices = ClassChoices(
         branchformer=BranchformerEncoder,
         whisper=OpenAIWhisperEncoder,
         e_branchformer=EBranchformerEncoder,
+        e_branchformer_sm=EBranchformerEncoder_SM,
+        e_branchformer_sm_lite=EBranchformerEncoder_SM_Lite,
         avhubert=FairseqAVHubertEncoder,
+        mobile_branchformer = MobileBranchformerEncoder
     ),
     type_check=AbsEncoder,
     default="rnn",

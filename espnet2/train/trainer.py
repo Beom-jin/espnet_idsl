@@ -255,7 +255,8 @@ class Trainer:
                         if distributed_option.ngpu == 1
                         else None
                     ),
-                    find_unused_parameters=trainer_options.unused_parameters,
+                    #find_unused_parameters=trainer_options.unused_parameters, 
+                    find_unused_parameters=True, # debuging for mobile branchformer 
                 )
         elif distributed_option.ngpu > 1:
             dp_model = torch.nn.parallel.DataParallel(
