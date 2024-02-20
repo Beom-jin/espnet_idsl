@@ -49,6 +49,8 @@ from espnet.nets.pytorch_backend.transformer.subsampling import (
     check_short_utt,
 )
 
+import espnet2.asr.encoder.summary_mixing as sm
+from espnet2.asr.encoder.speechbrain.lobes.models.VanillaNN import VanillaNN
 
 class EBranchformerEncoderLayer_SM_Lite(torch.nn.Module):
     """E-Branchformer encoder layer module.
@@ -76,8 +78,36 @@ class EBranchformerEncoderLayer_SM_Lite(torch.nn.Module):
         super().__init__()
 
         self.size = size
-        self.attn = attn
+        #self.attn = attn
         self.cgmlp = cgmlp
+        size = 256
+        d_model = size ## E-branchformer Base Dimension = 256
+        nhead = int(size / 64)  ## E-branchformer Base nhead = Dimension / 64 =4 
+        summary_hid_dim = [size] # = E-Branchformer Base dimension
+        local_proj_hid_dim = [size]# = E-Branchformer Base dimension
+        local_proj_out_dim = size # = E-Branchformer Base dimension
+        summary_out_dim = size # = E-Branchformer Base dimension
+        activation=torch.nn.GELU
+        mode = 'SummaryMixing-lite' #'SummaryMixing' or 'SummaryMixing-lite'
+
+        self.mha_layer = sm.SummaryMixing(
+                    enc_dim=d_model,
+                    nhead=nhead,
+                    local_proj_hid_dim=local_proj_hid_dim,
+                    local_proj_out_dim=local_proj_out_dim,
+                    summary_hid_dim=summary_hid_dim,
+                    summary_out_dim=summary_out_dim,
+                    activation=activation,
+                    mode=mode,
+                )
+        self.merge_dnn_blocks = summary_hid_dim + [d_model]
+        self.merge_proj = VanillaNN(
+            input_shape=[None, None, local_proj_out_dim + summary_out_dim],
+            dnn_blocks=len(self.merge_dnn_blocks),
+            dnn_neurons=self.merge_dnn_blocks,
+            activation=activation,
+        )
+
 
         self.feed_forward = feed_forward
         self.feed_forward_macaron = feed_forward_macaron
@@ -136,19 +166,19 @@ class EBranchformerEncoderLayer_SM_Lite(torch.nn.Module):
         x1 = x
         x2 = x
 
-        # Branch 1: multi-headed attention module
-        x1 = self.norm_mha(x1)
+        # # Branch 1: multi-headed attention module
+        # x1 = self.norm_mha(x1)
 
-        if isinstance(self.attn, FastSelfAttention):
-            x_att = self.attn(x1, mask)
-        else:
-            if pos_emb is not None:
-                x_att = self.attn(x1, x1, x1, pos_emb, mask)
-            else:
-                x_att = self.attn(x1, x1, x1, mask)
+        # if isinstance(self.attn, FastSelfAttention):
+        #     x_att = self.attn(x1, mask)
+        # else:
+        #     if pos_emb is not None:
+        #         x_att = self.attn(x1, x1, x1, pos_emb, mask)
+        #     else:
+        #         x_att = self.attn(x1, x1, x1, mask)
 
-        x1 = self.dropout(x_att)
-
+        # x1 = self.dropout(x_att)
+        x1 = self.mha_layer(x1)
         # Branch 2: convolutional gating mlp
         x2 = self.norm_mlp(x2)
 

@@ -49,11 +49,9 @@ from espnet.nets.pytorch_backend.transformer.subsampling import (
     check_short_utt,
 )
 
-import espnet2.asr.encoder.summary_mixing as sm
-from espnet2.asr.encoder.speechbrain.lobes.models.VanillaNN import VanillaNN
 
-class EBranchformerEncoderLayer_SM(torch.nn.Module):
-    """E-Branchformer encoder layer module.
+class BeomjinformerEncoderLayer(torch.nn.Module):
+    """Mobile-Branchformer encoder layer module.
 
     Args:
         size (int): model dimension
@@ -78,63 +76,40 @@ class EBranchformerEncoderLayer_SM(torch.nn.Module):
         super().__init__()
 
         self.size = size
-        #self.attn = attn
-        self.cgmlp = cgmlp
-        size = 256
-        d_model = size ## E-branchformer Base Dimension = 256
-        nhead = int(size / 64)  ## E-branchformer Base nhead = Dimension / 64 =4 
-        summary_hid_dim = [size] # = E-Branchformer Base dimension
-        local_proj_hid_dim = [size]# = E-Branchformer Base dimension
-        local_proj_out_dim = size # = E-Branchformer Base dimension
-        summary_out_dim = size # = E-Branchformer Base dimension
-        activation=torch.nn.GELU
-        mode = 'SummaryMixing' #'SummaryMixing' or 'SummaryMixing-lite'
-
-        self.mha_layer = sm.SummaryMixing(
-                    enc_dim=d_model,
-                    nhead=nhead,
-                    local_proj_hid_dim=local_proj_hid_dim,
-                    local_proj_out_dim=local_proj_out_dim,
-                    summary_hid_dim=summary_hid_dim,
-                    summary_out_dim=summary_out_dim,
-                    activation=activation,
-                    mode=mode,
-                )
-        self.merge_dnn_blocks = summary_hid_dim + [d_model]
-        self.merge_proj = VanillaNN(
-            input_shape=[None, None, local_proj_out_dim + summary_out_dim],
-            dnn_blocks=len(self.merge_dnn_blocks),
-            dnn_neurons=self.merge_dnn_blocks,
-            activation=activation,
-        )
-
+        self.conv_kxk  = torch.nn.Conv1d(size,size,3,padding=1)
+        self.conv_act = torch.nn.SiLU()
+        self.conv_1x1  = torch.nn.Conv1d(size,size,1)
+        self.attn = attn
+        self.conv_proj  = torch.nn.Conv1d(size,size,1)
+        self.conv_concat  = torch.nn.Conv1d(size*2,size,3,padding=1)
+        #self.cgmlp = cgmlp
 
         self.feed_forward = feed_forward
         self.feed_forward_macaron = feed_forward_macaron
         self.ff_scale = 1.0
+
         if self.feed_forward is not None:
             self.norm_ff = LayerNorm(size)
         if self.feed_forward_macaron is not None:
             self.ff_scale = 0.5
             self.norm_ff_macaron = LayerNorm(size)
 
-        self.norm_mha = LayerNorm(size)  # for the MHA module
-        self.norm_mlp = LayerNorm(size)  # for the MLP module
-        self.norm_final = LayerNorm(size)  # for the final output of the block
-
+        self.norm_mha = LayerNorm(size) 
+        self.norm_conv_1x1 = LayerNorm(size) 
+        self.norm_conv_kxk = LayerNorm(size)  
+        self.norm_final = LayerNorm(size)  
         self.dropout = torch.nn.Dropout(dropout_rate)
 
-        self.depthwise_conv_fusion = torch.nn.Conv1d(
-            size + size,
-            size + size,
-            kernel_size=merge_conv_kernel,
-            stride=1,
-            padding=(merge_conv_kernel - 1) // 2,
-            groups=size + size,
-            bias=True,
-        )
-        self.merge_proj = torch.nn.Linear(size + size, size)
+        self.norm_mha_scale_a = torch.nn.Parameter(torch.tensor(0.0))
+        self.norm_mha_scale_b = torch.nn.Parameter(torch.tensor(0.0))
 
+        self.norm_conv_1x1_scale_a = torch.nn.Parameter(torch.tensor(0.0))
+        self.norm_conv_1x1_scale_b = torch.nn.Parameter(torch.tensor(0.0))
+
+        self.norm_conv_kxk_scale_a = torch.nn.Parameter(torch.tensor(0.0))
+        self.norm_conv_kxk_scale_b = torch.nn.Parameter(torch.tensor(0.0))
+
+      
     def forward(self, x_input, mask, cache=None):
         """Compute encoded features.
 
@@ -162,48 +137,57 @@ class EBranchformerEncoderLayer_SM(torch.nn.Module):
             x = self.norm_ff_macaron(x)
             x = residual + self.ff_scale * self.dropout(self.feed_forward_macaron(x))
 
-        # Two branches
-        x1 = x
-        x2 = x
 
-        # # Branch 1: multi-headed attention module
-        # x1 = self.norm_mha(x1)
+        # Attention
+        residual = x 
+        if isinstance(self.attn, FastSelfAttention):
+            x_att = self.attn(x, mask)
+        else:
+            if pos_emb is not None:
+                x_att = self.attn(x, x, x, pos_emb, mask)
+            else:
+                x_att = self.attn(x, x, x, mask)
+        x = x + residual
+        x = self.norm_mha(x)
+        x = self.norm_mha_scale_a * x + self.norm_mha_scale_b
+
+        residual = x  
+        b,n,c = x.size()
+        x = x.view(b,c,n)  # Attn to Conv resize 
+
+        x = self.conv_1x1(x)
+        x = self.conv_act(x)
+
+        b,n,c = x.size()
+        x = x.view(b,c,n) 
+        x = x + residual
+
+        x = self.norm_conv_1x1(x)
+        x = self.norm_conv_1x1_scale_a * x + self.norm_conv_1x1_scale_b
+
+        residual = x 
+        b,n,c = x.size()
+        x = x.view(b,c,n)  # Attn to Conv resize 
+        
+        x = self.conv_kxk(x)
+        x = self.conv_act(x)
+
+        b,n,c = x.size()
+        x = x.view(b,c,n) ## Conv to Attn resize 
+        x = x + residual
+
+        x = self.norm_conv_kxk(x)
+        x = self.norm_conv_kxk_scale_a * x  + self.norm_conv_kxk_scale_b
+
 
         # if isinstance(self.attn, FastSelfAttention):
-        #     x_att = self.attn(x1, mask)
+        #     x_att = self.attn(x, mask)
         # else:
         #     if pos_emb is not None:
-        #         x_att = self.attn(x1, x1, x1, pos_emb, mask)
+        #         x_att = self.attn(x, x, x, pos_emb, mask)
         #     else:
-        #         x_att = self.attn(x1, x1, x1, mask)
-
-        # x1 = self.dropout(x_att)
-        x1 = self.mha_layer(x1)
-        # Branch 2: convolutional gating mlp
-        x2 = self.norm_mlp(x2)
-
-        if pos_emb is not None:
-            x2 = (x2, pos_emb)
-        x2 = self.cgmlp(x2, mask)
-        if isinstance(x2, tuple):
-            x2 = x2[0]
-
-        x2 = self.dropout(x2)
-
-        # Merge two branches
-        x_concat = torch.cat([x1, x2], dim=-1)
-        x_tmp = x_concat.transpose(1, 2)
-        x_tmp = self.depthwise_conv_fusion(x_tmp)
-        x_tmp = x_tmp.transpose(1, 2)
-        x = x + self.dropout(self.merge_proj(x_concat + x_tmp))
-
-        if self.feed_forward is not None:
-            # feed forward module
-            residual = x
-            x = self.norm_ff(x)
-            x = residual + self.ff_scale * self.dropout(self.feed_forward(x))
-
-        x = self.norm_final(x)
+        #         x_att = self.attn(x, x, x, mask)
+       
 
         if pos_emb is not None:
             return (x, pos_emb), mask
@@ -211,8 +195,8 @@ class EBranchformerEncoderLayer_SM(torch.nn.Module):
         return x, mask
 
 
-class EBranchformerEncoder_SM(AbsEncoder):
-    """E-Branchformer encoder module."""
+class BeomjinformerEncoder(AbsEncoder):
+    """Mobile-Branchformer encoder module."""
 
     def __init__(
         self,
@@ -422,7 +406,7 @@ class EBranchformerEncoder_SM(AbsEncoder):
 
         self.encoders = repeat(
             num_blocks,
-            lambda lnum: EBranchformerEncoderLayer_SM(
+            lambda lnum: BeomjinEncoderLayer(
                 output_size,
                 encoder_selfattn_layer(*encoder_selfattn_layer_args),
                 cgmlp_layer(*cgmlp_layer_args),

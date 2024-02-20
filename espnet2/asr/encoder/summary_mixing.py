@@ -159,7 +159,7 @@ class SummaryMixing(nn.Module):
         """
 
         B, T, F = x.shape
-
+        attention_mask = attention_mask.to(x.device)
         # f() (Eq. 1b)
         local_summary = self.local_norm(self.local_proj(x) * attention_mask)
 
@@ -191,6 +191,7 @@ class SummaryMixing(nn.Module):
 
         # s() We just do the mean over time
         # Then we repeat the output matrix T times along the time axis
+        attention_mask = attention_mask.to(x.device)
         time_summary = self.summary_proj(x) * attention_mask
         time_summary = torch.sum(time_summary, dim=1) / torch.sum(attention_mask, dim=1)
         time_summary = time_summary.unsqueeze(1).expand(-1, T, -1)

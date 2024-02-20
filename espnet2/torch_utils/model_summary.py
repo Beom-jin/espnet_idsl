@@ -48,8 +48,9 @@ def to_bytes(dtype) -> int:
 def model_summary(model: torch.nn.Module) -> str:
     message = "Model structure:\n"
     message += str(model)
-    tot_params = sum(p.numel() for p in model.parameters())
+    tot_params = sum(p.numel() for p in model.encoder.parameters())
     num_params = sum(p.numel() for p in model.parameters() if p.requires_grad)
+    
     percent_trainable = "{:.1f}".format(num_params * 100.0 / tot_params)
     tot_params = get_human_readable_count(tot_params)
     num_params = get_human_readable_count(num_params)

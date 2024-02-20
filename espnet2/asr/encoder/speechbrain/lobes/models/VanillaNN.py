@@ -15,9 +15,9 @@ Authors
 import torch
 import math
 from torch import nn
-import espnet2.asr.encoder.speechbrain as sb
+import speechbrain as sb
 from typing import Optional
-
+from speechbrain.nnet.containers import Sequential
 
 
 class ParallelLinear(torch.nn.Module):
@@ -114,7 +114,7 @@ class ParallelLinear(torch.nn.Module):
         return x
 
 
-class VanillaNN(torch.nn.Sequential):
+class VanillaNN(Sequential):
     """A simple vanilla Deep Neural Network.
 
     Arguments

@@ -27,6 +27,7 @@ from espnet2.asr.encoder.abs_encoder import AbsEncoder
 from espnet2.asr.encoder.avhubert_encoder import FairseqAVHubertEncoder
 from espnet2.asr.encoder.branchformer_encoder import BranchformerEncoder
 from espnet2.asr.encoder.mobile_branchformer_encoder import MobileBranchformerEncoder
+from espnet2.asr.encoder.beomjin_former_encoder import BeomjinformerEncoder
 from espnet2.asr.encoder.conformer_encoder import ConformerEncoder
 from espnet2.asr.encoder.contextual_block_conformer_encoder import (
     ContextualBlockConformerEncoder,
@@ -162,7 +163,8 @@ encoder_choices = ClassChoices(
         e_branchformer_sm=EBranchformerEncoder_SM,
         e_branchformer_sm_lite=EBranchformerEncoder_SM_Lite,
         avhubert=FairseqAVHubertEncoder,
-        mobile_branchformer = MobileBranchformerEncoder
+        mobile_branchformer = MobileBranchformerEncoder,
+        beomjinformer = BeomjinformerEncoder
     ),
     type_check=AbsEncoder,
     default="rnn",

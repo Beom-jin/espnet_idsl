@@ -80,8 +80,8 @@ class MobileBranchformerEncoderLayer(torch.nn.Module):
         self.conv_1x1  = torch.nn.Conv1d(size,size,1)
         self.attn = attn
         self.conv_proj  = torch.nn.Conv1d(size,size,1)
-        self.conv_concat  = torch.nn.Conv1d(size,size,3,padding=1)
-        self.cgmlp = cgmlp
+        self.conv_concat  = torch.nn.Conv1d(size*2,size,3,padding=1)
+        #self.cgmlp = cgmlp
 
         self.feed_forward = feed_forward
         self.feed_forward_macaron = feed_forward_macaron
@@ -93,21 +93,21 @@ class MobileBranchformerEncoderLayer(torch.nn.Module):
             self.norm_ff_macaron = LayerNorm(size)
 
         self.norm_mha = LayerNorm(size)  # for the MHA module
-        self.norm_mlp = LayerNorm(size)  # for the MLP module
+        #self.norm_mlp = LayerNorm(size)  # for the MLP module
         self.norm_final = LayerNorm(size)  # for the final output of the block
 
         self.dropout = torch.nn.Dropout(dropout_rate)
 
-        self.depthwise_conv_fusion = torch.nn.Conv1d(
-            size + size,
-            size + size,
-            kernel_size=merge_conv_kernel,
-            stride=1,
-            padding=(merge_conv_kernel - 1) // 2,
-            groups=size + size,
-            bias=True,
-        )
-        self.merge_proj = torch.nn.Linear(size + size, size)
+        # self.depthwise_conv_fusion = torch.nn.Conv1d(
+        #     size + size,
+        #     size + size,
+        #     kernel_size=merge_conv_kernel,
+        #     stride=1,
+        #     padding=(merge_conv_kernel - 1) // 2,
+        #     groups=size + size,
+        #     bias=True,
+        # )
+        #self.merge_proj = torch.nn.Linear(size + size, size)
 
     def forward(self, x_input, mask, cache=None):
         """Compute encoded features.
@@ -138,19 +138,19 @@ class MobileBranchformerEncoderLayer(torch.nn.Module):
 
         # Two branches
         x1 = x
-        x2 = x
+        residual = x 
+        #x2 = x
 
-        # Branch 1: multi-headed attention module
+       
         x1 = self.norm_mha(x1)
-        # add MobileViT Encoder Conv
-        #print(x1.size())
+        
         b,n,c = x1.size()
         x1 = x1.view(b,c,n) 
         x1 = self.conv_kxk(x1)
         x1 = self.conv_1x1(x1)
         b,n,c = x1.size()
+
         x1 = x1.view(b,c,n)
-        
         if isinstance(self.attn, FastSelfAttention):
             x_att = self.attn(x1, mask)
         else:
@@ -158,38 +158,44 @@ class MobileBranchformerEncoderLayer(torch.nn.Module):
                 x_att = self.attn(x1, x1, x1, pos_emb, mask)
             else:
                 x_att = self.attn(x1, x1, x1, mask)
-
+       
         b,n,c = x1.size()
         x1 = x1.view(b,c,n)
         x1 = self.conv_proj(x1)
-        x1 = self.conv_concat(x1)
+        residual = residual.view(b,c,n)
+        
+        x1 = self.conv_concat(torch.concat((x1,residual),dim=1))
         b,n,c = x1.size()
         x1 = x1.view(b,c,n)
+        residual = residual.view(b,c,n)
+    
         x1 = self.dropout(x_att)
+        x1 = x1 + residual
+        x = self.norm_final(x)
 
-        # Branch 2: convolutional gating mlp
-        x2 = self.norm_mlp(x2)
+        # # Branch 2: convolutional gating mlp
+        # x2 = self.norm_mlp(x2)
 
-        if pos_emb is not None:
-            x2 = (x2, pos_emb)
-        x2 = self.cgmlp(x2, mask)
-        if isinstance(x2, tuple):
-            x2 = x2[0]
+        # if pos_emb is not None:
+        #     x2 = (x2, pos_emb)
+        # x2 = self.cgmlp(x2, mask)
+        # if isinstance(x2, tuple):
+        #     x2 = x2[0]
 
-        x2 = self.dropout(x2)
+        # x2 = self.dropout(x2)
 
         # Merge two branches
-        x_concat = torch.cat([x1, x2], dim=-1)
-        x_tmp = x_concat.transpose(1, 2)
-        x_tmp = self.depthwise_conv_fusion(x_tmp)
-        x_tmp = x_tmp.transpose(1, 2)
-        x = x + self.dropout(self.merge_proj(x_concat + x_tmp))
+        # x_concat = torch.cat([x1, x2], dim=-1)
+        # x_tmp = x_concat.transpose(1, 2)
+        # x_tmp = self.depthwise_conv_fusion(x_tmp)
+        # x_tmp = x_tmp.transpose(1, 2)
+        # x = x + self.dropout(self.merge_proj(x_concat + x_tmp))
 
-        if self.feed_forward is not None:
-            # feed forward module
-            residual = x
-            x = self.norm_ff(x)
-            x = residual + self.ff_scale * self.dropout(self.feed_forward(x))
+        # if self.feed_forward is not None:
+        #     # feed forward module
+        #     residual = x
+        #     x = self.norm_ff(x)
+        #     x = residual + self.ff_scale * self.dropout(self.feed_forward(x))
 
         x = self.norm_final(x)
 
